@@ -1,23 +1,25 @@
--- [[ SIMPAN FILE INI SEBAGAI: engine.lua DI GITHUB ]]
+-- [[ ENGINE START ]]
 local Engine = {} 
 
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- Variables
+-- Internal Variables
 local TASDataCache = {}
 local isCached = false
 local isPlaying = false
 local isLooping = false
-[span_1](start_span)local isFlipped = false -- Variable baru untuk status Flip[span_1](end_span)
+local isFlipped = false -- Variable status Flip
 local SavedCP = 0
 local SavedFrame = 1
 local END_CP = 1000
 local CurrentRepoURL = ""
 
--- Helpers
+-- [[ INTERNAL FUNCTIONS ]] --
+
 local function ResetCharacter()
     local Char = LocalPlayer.Character
     if Char then
@@ -48,13 +50,16 @@ local function FindClosestPoint()
         if data then
             for f = 1, #data, 10 do
                 local frame = data[f]
-                local fPos = Vector3.new(frame.POS.x, frame.POS.y, frame.POS.z)
-                local dist = (myPos - fPos).Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    bestCP = i
-                    bestFrame = f
-                    bestPos = fPos
+                -- Pastikan frame memiliki data posisi
+                if frame and frame.POS then
+                    local fPos = Vector3.new(frame.POS.x, frame.POS.y, frame.POS.z)
+                    local dist = (myPos - fPos).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        bestCP = i
+                        bestFrame = f
+                        bestPos = fPos
+                    end
                 end
             end
         end
@@ -64,16 +69,20 @@ end
 
 local function WalkToTarget(targetPos)
     local Char = LocalPlayer.Character
+    if not Char then return end
     local Hum = Char:FindFirstChild("Humanoid")
     local Root = Char:FindFirstChild("HumanoidRootPart")
     
+    if not Hum or not Root then return end
+
     Hum.AutoRotate = true
     Hum.PlatformStand = false
     Root.Anchored = false
     local oldSpeed = Hum.WalkSpeed 
-    Hum.WalkSpeed = 60 
+    Hum.WalkSpeed = 60 -- Lari ke titik start
     
     while isPlaying do
+        if not Root then break end
         local dist = (Root.Position - targetPos).Magnitude
         if dist < 5 then break end 
         Hum:MoveTo(targetPos)
@@ -89,15 +98,21 @@ local function DownloadData(repoURL)
     for i = 0, END_CP do
         if not isPlaying then return false end
         local url = repoURL .. "cp_" .. i .. ".json"
+        
         local success, response = pcall(function() return game:HttpGet(url) end)
+        
         if success then
             local decodeSuccess, data = pcall(function() return HttpService:JSONDecode(response) end)
-            if decodeSuccess then TASDataCache[i] = data end
+            if decodeSuccess then 
+                TASDataCache[i] = data 
+                count = count + 1
+            end
         else
+            -- Jika error/404, stop download (File Habis)
             break 
         end
-        if i % 5 == 0 then RunService.Heartbeat:Wait() end
-        count = count + 1
+        
+        if i % 10 == 0 then RunService.Heartbeat:Wait() end
     end
     return count > 0
 end
@@ -114,6 +129,8 @@ local function RunPlaybackLogic()
     local Root = Char:FindFirstChild("HumanoidRootPart")
 
     while isPlaying do
+        if not Char or not Root or not Hum then break end
+
         Root.Anchored = false
         Hum.PlatformStand = false 
         Hum.AutoRotate = false
@@ -128,52 +145,56 @@ local function RunPlaybackLogic()
                 if not isPlaying then break end
                 SavedFrame = f 
                 local frame = data[f]
-                if not Char or not Root then isPlaying = false break end
+                
+                -- Cek karakter masih ada atau tidak
+                if not Char.Parent then isPlaying = false break end
 
-                -- 1. Height Fix
+                -[span_0](start_span)- [LOGIC 1] Auto Height Fix[span_0](end_span)
                 local recordedHip = frame.HIP or 2
                 local currentHip = Hum.HipHeight
                 if currentHip <= 0 then currentHip = 2 end
                 local heightDiff = currentHip - recordedHip
                 
-                -[span_2](start_span)- 2. Posisi & Rotasi FLIP[span_2](end_span)
+                [cite_start]-- [LOGIC 2] Posisi & Rotasi (+ FLIP Logic) [cite: 30-31]
                 local posX = frame.POS.x
                 local posY = frame.POS.y + heightDiff 
                 local posZ = frame.POS.z
                 local rotY = frame.ROT or 0
                 
-                -- LOGIC FLIP ROTASI (Menghadap Belakang)
+                -- Jika Flip aktif, putar badan 180 derajat
                 if isFlipped then
-                    rotY = rotY + math.pi -- Putar 180 derajat
+                    rotY = rotY + math.pi 
                 end
                 
                 Root.CFrame = CFrame.new(posX, posY, posZ) * CFrame.Angles(0, rotY, 0)
 
-                -[span_3](start_span)- 3. Velocity FLIP[span_3](end_span)
+                [cite_start]-- [LOGIC 3] Velocity FLIP (Agar animasi lari sesuai) [cite: 31-32]
                 if frame.VEL then
-                    local vx = frame.VEL.x
-                    local vy = frame.VEL.y
-                    local vz = frame.VEL.z
+                    local vel = Vector3.new(frame.VEL.x, frame.VEL.y, frame.VEL.z)
                     
-                    -- LOGIC FLIP VELOCITY (Agar animasi lari tetap jalan walau mundur)
+                    -- Jika Flip aktif, balik arah velocity (untuk efek Moonwalk/Animasi Mundur)
                     if isFlipped then
-                        vx = -vx
-                        vz = -vz
+                        vel = Vector3.new(-vel.X, vel.Y, -vel.Z)
                     end
                     
-                    Root.AssemblyLinearVelocity = Vector3.new(vx, vy, vz)
+                    Root.AssemblyLinearVelocity = vel
                 else
                     Root.AssemblyLinearVelocity = Vector3.zero
                 end
                 
-                -- Force State
+                -- Force State Running agar animasi aktif
                 Hum:ChangeState(Enum.HumanoidStateType.Running)
 
+                [cite_start]-- Handle Jump/Freefall [cite: 33-35]
                 if frame.STA then
                     local s = frame.STA
-                    if s == "Jumping" then Hum:ChangeState(Enum.HumanoidStateType.Jumping) Hum.Jump = true
-                    elseif s == "Freefall" then Hum:ChangeState(Enum.HumanoidStateType.Freefall)
-                    elseif s == "Landed" then Hum:ChangeState(Enum.HumanoidStateType.Landed)
+                    if s == "Jumping" then 
+                        Hum:ChangeState(Enum.HumanoidStateType.Jumping) 
+                        Hum.Jump = true
+                    elseif s == "Freefall" then 
+                        Hum:ChangeState(Enum.HumanoidStateType.Freefall)
+                    elseif s == "Landed" then 
+                        Hum:ChangeState(Enum.HumanoidStateType.Landed)
                     end
                 end
                 
@@ -199,7 +220,7 @@ local function RunPlaybackLogic()
     end
 end
 
--- [[ EXPOSED FUNCTIONS ]] --
+-- [[ EXPOSED FUNCTIONS (YANG DIPANGGIL UI) ]] --
 
 function Engine.SetURL(url)
     if CurrentRepoURL ~= url then
@@ -210,17 +231,20 @@ function Engine.SetURL(url)
     end
 end
 
-function Engine.SetLoop(state) isLooping = state end
+function Engine.SetLoop(state)
+    isLooping = state
+end
 
--- Fungsi baru untuk mengatur Flip
-function Engine.SetFlip(state) 
-    isFlipped = state 
+function Engine.SetFlip(state)
+    isFlipped = state
 end
 
 function Engine.Play()
     if isPlaying then return "Running" end
     if CurrentRepoURL == "" then return "NoURL" end
+    
     isPlaying = true
+    
     task.spawn(function()
         if not isCached then
             local success = DownloadData(CurrentRepoURL)
@@ -238,7 +262,8 @@ end
 function Engine.Stop()
     if isPlaying then
         isPlaying = false
-        task.wait(0.1)
+        -- Tunggu frame berikutnya agar loop berhenti aman
+        task.wait()
         ResetCharacter()
         return "Stopped"
     end
