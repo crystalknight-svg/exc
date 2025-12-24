@@ -1,4 +1,4 @@
--- [[ ENGINE START ]]
+-- [[ ENGINE START - SAFE MODE ]]
 local Engine = {} 
 
 -- Services
@@ -50,7 +50,6 @@ local function FindClosestPoint()
         if data then
             for f = 1, #data, 10 do
                 local frame = data[f]
-                -- Pastikan frame memiliki data posisi
                 if frame and frame.POS then
                     local fPos = Vector3.new(frame.POS.x, frame.POS.y, frame.POS.z)
                     local dist = (myPos - fPos).Magnitude
@@ -70,6 +69,7 @@ end
 local function WalkToTarget(targetPos)
     local Char = LocalPlayer.Character
     if not Char then return end
+    
     local Hum = Char:FindFirstChild("Humanoid")
     local Root = Char:FindFirstChild("HumanoidRootPart")
     
@@ -79,14 +79,20 @@ local function WalkToTarget(targetPos)
     Hum.PlatformStand = false
     Root.Anchored = false
     local oldSpeed = Hum.WalkSpeed 
-    Hum.WalkSpeed = 60 -- Lari ke titik start
+    Hum.WalkSpeed = 60 
     
     while isPlaying do
         if not Root then break end
+        
         local dist = (Root.Position - targetPos).Magnitude
         if dist < 5 then break end 
+        
         Hum:MoveTo(targetPos)
-        if Root.Position.Y < -50 then Root.CFrame = CFrame.new(targetPos) break end
+        
+        if Root.Position.Y < -50 then 
+            Root.CFrame = CFrame.new(targetPos) 
+            break 
+        end
         RunService.Heartbeat:Wait()
     end
     Hum.WalkSpeed = oldSpeed 
@@ -95,6 +101,7 @@ end
 local function DownloadData(repoURL)
     local count = 0
     TASDataCache = {}
+    
     for i = 0, END_CP do
         if not isPlaying then return false end
         local url = repoURL .. "cp_" .. i .. ".json"
@@ -108,7 +115,6 @@ local function DownloadData(repoURL)
                 count = count + 1
             end
         else
-            -- Jika error/404, stop download (File Habis)
             break 
         end
         
@@ -138,69 +144,72 @@ local function RunPlaybackLogic()
         for i = SavedCP, #TASDataCache do
             if not isPlaying then break end
             SavedCP = i
-            local data = TASDataCache[i]
-            if not data then continue end
             
-            for f = SavedFrame, #data do
-                if not isPlaying then break end
-                SavedFrame = f 
-                local frame = data[f]
-                
-                -- Cek karakter masih ada atau tidak
-                if not Char.Parent then isPlaying = false break end
-
-                -[span_0](start_span)- [LOGIC 1] Auto Height Fix[span_0](end_span)
-                local recordedHip = frame.HIP or 2
-                local currentHip = Hum.HipHeight
-                if currentHip <= 0 then currentHip = 2 end
-                local heightDiff = currentHip - recordedHip
-                
-                [cite_start]-- [LOGIC 2] Posisi & Rotasi (+ FLIP Logic) [cite: 30-31]
-                local posX = frame.POS.x
-                local posY = frame.POS.y + heightDiff 
-                local posZ = frame.POS.z
-                local rotY = frame.ROT or 0
-                
-                -- Jika Flip aktif, putar badan 180 derajat
-                if isFlipped then
-                    rotY = rotY + math.pi 
-                end
-                
-                Root.CFrame = CFrame.new(posX, posY, posZ) * CFrame.Angles(0, rotY, 0)
-
-                [cite_start]-- [LOGIC 3] Velocity FLIP (Agar animasi lari sesuai) [cite: 31-32]
-                if frame.VEL then
-                    local vel = Vector3.new(frame.VEL.x, frame.VEL.y, frame.VEL.z)
+            local data = TASDataCache[i]
+            
+            -- FIX SYNTAX: Mengganti 'continue' dengan blok if
+            if data then
+                for f = SavedFrame, #data do
+                    if not isPlaying then break end
+                    SavedFrame = f 
+                    local frame = data[f]
                     
-                    -- Jika Flip aktif, balik arah velocity (untuk efek Moonwalk/Animasi Mundur)
+                    if not Char.Parent then 
+                        isPlaying = false 
+                        break 
+                    end
+
+                    -- [LOGIC 1] Auto Height
+                    local recordedHip = frame.HIP or 2
+                    local currentHip = Hum.HipHeight
+                    if currentHip <= 0 then currentHip = 2 end
+                    local heightDiff = currentHip - recordedHip
+                    
+                    -[span_0](start_span)- [LOGIC 2] Posisi & Rotasi [cite: 30-31]
+                    local posX = frame.POS.x
+                    local posY = frame.POS.y + heightDiff 
+                    local posZ = frame.POS.z
+                    local rotY = frame.ROT or 0
+                    
                     if isFlipped then
-                        vel = Vector3.new(-vel.X, vel.Y, -vel.Z)
+                        rotY = rotY + math.pi 
                     end
                     
-                    Root.AssemblyLinearVelocity = vel
-                else
-                    Root.AssemblyLinearVelocity = Vector3.zero
-                end
-                
-                -- Force State Running agar animasi aktif
-                Hum:ChangeState(Enum.HumanoidStateType.Running)
+                    Root.CFrame = CFrame.new(posX, posY, posZ) * CFrame.Angles(0, rotY, 0)
 
-                [cite_start]-- Handle Jump/Freefall [cite: 33-35]
-                if frame.STA then
-                    local s = frame.STA
-                    if s == "Jumping" then 
-                        Hum:ChangeState(Enum.HumanoidStateType.Jumping) 
-                        Hum.Jump = true
-                    elseif s == "Freefall" then 
-                        Hum:ChangeState(Enum.HumanoidStateType.Freefall)
-                    elseif s == "Landed" then 
-                        Hum:ChangeState(Enum.HumanoidStateType.Landed)
+                    [cite_start]-- [LOGIC 3] Velocity FLIP [cite: 31-32]
+                    if frame.VEL then
+                        local vel = Vector3.new(frame.VEL.x, frame.VEL.y, frame.VEL.z)
+                        
+                        if isFlipped then
+                            vel = Vector3.new(-vel.X, vel.Y, -vel.Z)
+                        end
+                        
+                        Root.AssemblyLinearVelocity = vel
+                    else
+                        Root.AssemblyLinearVelocity = Vector3.zero
                     end
+                    
+                    [cite_start]-- Force State Running[span_0](end_span)
+                    Hum:ChangeState(Enum.HumanoidStateType.Running)
+
+                    if frame.STA then
+                        local s = frame.STA
+                        if s == "Jumping" then 
+                            Hum:ChangeState(Enum.HumanoidStateType.Jumping) 
+                            Hum.Jump = true
+                        elseif s == "Freefall" then 
+                            Hum:ChangeState(Enum.HumanoidStateType.Freefall)
+                        elseif s == "Landed" then 
+                            Hum:ChangeState(Enum.HumanoidStateType.Landed)
+                        end
+                    end
+                    
+                    RunService.Heartbeat:Wait()
                 end
                 
-                RunService.Heartbeat:Wait()
+                if isPlaying then SavedFrame = 1 end 
             end
-            if isPlaying then SavedFrame = 1 end 
         end
 
         if isPlaying then
@@ -220,7 +229,7 @@ local function RunPlaybackLogic()
     end
 end
 
--- [[ EXPOSED FUNCTIONS (YANG DIPANGGIL UI) ]] --
+-- [[ EXPOSED FUNCTIONS ]] --
 
 function Engine.SetURL(url)
     if CurrentRepoURL ~= url then
@@ -262,7 +271,6 @@ end
 function Engine.Stop()
     if isPlaying then
         isPlaying = false
-        -- Tunggu frame berikutnya agar loop berhenti aman
         task.wait()
         ResetCharacter()
         return "Stopped"
